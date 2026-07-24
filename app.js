@@ -10121,8 +10121,40 @@ async function importData(input) {
 
             const success = await hydrateDatabase(parsedData);
             if (success) {
-                showNotification('✅ تم استعادة البيانات بنجاح! سيتم تحديث البرنامج...', 'success');
-                setTimeout(() => location.reload(), 2000);
+                showNotification('✅ تم استعادة البيانات بنجاح! جاري الرفع على السحاب...', 'success');
+
+                // ☁️ رفع البيانات المستعادة على Firebase تلقائياً
+                try {
+                    if (typeof CloudSync !== 'undefined' && CloudSync.isReady && CloudSync.isReady()) {
+                        showNotification('☁️ جاري مزامنة البيانات مع السحاب... يرجى الانتظار', 'info');
+                        await CloudSync.forceFullUpload();
+                        showNotification('✅ تمت المزامنة مع السحاب بنجاح!', 'success');
+                    } else if (typeof CloudSync !== 'undefined' && CloudSync.init) {
+                        // السحاب لم يتصل بعد — نهيئه ثم نرفع
+                        showNotification('☁️ جاري الاتصال بالسحاب ورفع البيانات...', 'info');
+                        await new Promise(resolve => {
+                            const maxWait = 15000;
+                            const start = Date.now();
+                            const check = setInterval(async () => {
+                                if (CloudSync.isReady && CloudSync.isReady()) {
+                                    clearInterval(check);
+                                    try { await CloudSync.forceFullUpload(); } catch(e) { console.warn('[Import→Cloud] forceFullUpload failed:', e); }
+                                    showNotification('✅ تمت المزامنة مع السحاب!', 'success');
+                                    resolve();
+                                } else if (Date.now() - start > maxWait) {
+                                    clearInterval(check);
+                                    showNotification('⚠️ تعذّر الاتصال بالسحاب — البيانات محفوظة محلياً فقط.', 'warning');
+                                    resolve();
+                                }
+                            }, 800);
+                        });
+                    }
+                } catch (syncErr) {
+                    console.warn('[Import→Cloud] sync error:', syncErr);
+                    showNotification('⚠️ تم الاستعادة محلياً لكن تعذّرت المزامنة مع السحاب.', 'warning');
+                }
+
+                setTimeout(() => location.reload(), 2500);
             } else {
                 throw new Error('تعذّر استيراد البيانات — الملف لا يحتوي على بيانات صالحة');
             }

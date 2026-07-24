@@ -352,6 +352,22 @@ const CloudSync = (() => {
         pushSettings().catch(e => console.error('[CloudSync] push settings failed', e));
     }
 
+    // ☁️ رفع كامل وانتظار انتهائه — يُستخدم بعد استعادة نسخة احتياطية
+    async function forceFullUpload() {
+        if (!ready) throw new Error('CloudSync not ready');
+        console.log('[CloudSync] 🚀 forceFullUpload — رفع كامل لجميع الجداول...');
+        const results = await Promise.allSettled([
+            ...SYNC_TABLES.map(t => pushTableDiff(t)),
+            pushSettings()
+        ]);
+        const failed = results.filter(r => r.status === 'rejected');
+        if (failed.length > 0) {
+            failed.forEach(f => console.warn('[CloudSync] forceFullUpload partial fail:', f.reason));
+        }
+        console.log(`[CloudSync] ✅ forceFullUpload انتهى — ${results.length - failed.length}/${results.length} جدول تم رفعه`);
+        return { total: results.length, failed: failed.length };
+    }
+
     async function syncTableNow(table) {
         if (!ready || !SYNC_TABLES.includes(table)) {
             throw new Error('CloudSync is not ready for table: ' + table);
@@ -780,6 +796,7 @@ const CloudSync = (() => {
     return {
         init, onLocalSave, pushAllTables, isReady: () => ready, debugInfo,
         forceSync: pushAllTables,
+        forceFullUpload,
         syncTableNow, deleteRecord,
         manualPushToCloud, manualPullFromCloud,
         getFirestoreDB: () => fsDB
