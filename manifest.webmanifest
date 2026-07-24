@@ -1,7 +1,7 @@
 {
-  "name": "المهندس محمد نبيل للرياضيات",
-  "short_name": "محمد نبيل",
-  "description": "نظام إدارة المهندس محمد نبيل للرياضيات المتكامل",
+  "name": "مستر محمد نبيل",
+  "short_name": "مستر محمد نبيل",
+  "description": "نظام مستر محمد نبيل المتكامل",
   "start_url": "./",
   "display": "standalone",
   "orientation": "any",
@@ -46,14 +46,22 @@
       "label": "الصفحة الرئيسية"
     }
   ],
-  "categories": ["education", "productivity"],
+  "categories": [
+    "education",
+    "productivity"
+  ],
   "shortcuts": [
     {
       "name": "تسجيل الحضور",
       "short_name": "الحضور",
       "description": "فتح نظام تسجيل الحضور مباشرة",
       "url": "./#attendance",
-      "icons": [{ "src": "./app-icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "./app-icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

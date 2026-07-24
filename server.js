@@ -48,5 +48,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, host, () => {
-    console.log(`Markaz Mohamed Nabil (المهندس محمد نبيل للرياضيات) is running at http://${host}:${port}`);
+    console.log(`نظام إدارة الدروس is running at http://${host}:${port}`);
 });
