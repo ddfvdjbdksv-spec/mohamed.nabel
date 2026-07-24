@@ -11104,6 +11104,60 @@ async function exportStudentsToFirebase() {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-ban"></i> غير متاح'; }
 }
 
+// ☁️ رفع كل البيانات الحالية للسحاب يدوياً (الزرار الموجود في قسم الاحتياطي)
+async function forceCloudUploadFromMemory() {
+    const btn = document.getElementById('btn-force-cloud-upload');
+    const statusBox = document.getElementById('cloud-upload-status');
+
+    const setStatus = (msg, type) => {
+        if (!statusBox) return;
+        statusBox.style.display = 'block';
+        const colors = {
+            info: { bg: 'rgba(14,165,233,.1)', color: '#0284c7', border: 'rgba(14,165,233,.25)' },
+            success: { bg: 'rgba(16,185,129,.1)', color: '#059669', border: 'rgba(16,185,129,.25)' },
+            warning: { bg: 'rgba(245,158,11,.1)', color: '#d97706', border: 'rgba(245,158,11,.25)' },
+            error: { bg: 'rgba(239,68,68,.1)', color: '#dc2626', border: 'rgba(239,68,68,.25)' },
+        };
+        const c = colors[type] || colors.info;
+        statusBox.style.cssText = `display:block; padding:.9rem 1.2rem; border-radius:12px; margin-bottom:1.2rem; font-weight:600; font-size:.9rem; text-align:center; background:${c.bg}; color:${c.color}; border:1px solid ${c.border};`;
+        statusBox.innerHTML = msg;
+    };
+
+    if (typeof CloudSync === 'undefined') {
+        setStatus('⚠️ السحاب غير متاح في هذا الجهاز.', 'warning');
+        return;
+    }
+
+    if (!CloudSync.isReady || !CloudSync.isReady()) {
+        setStatus('⏳ السحاب لم يتصل بعد — يرجى الانتظار ثم المحاولة مرة أخرى.', 'warning');
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> جاري الرفع...'; }
+    setStatus('☁️ جاري رفع البيانات للسحاب... يرجى الانتظار', 'info');
+
+    try {
+        const result = await CloudSync.forceFullUpload(); // بدون parsedData = يرفع من الذاكرة بعد تصفير hashes
+        const uploaded = result.uploaded ?? (result.total - (result.failed || 0));
+        const failed = result.failed || 0;
+
+        if (failed === 0) {
+            setStatus(`✅ تمت المزامنة بنجاح! تم رفع ${uploaded} سجل للسحاب.`, 'success');
+            showNotification(`✅ تم رفع ${uploaded} سجل للسحاب بنجاح!`, 'success');
+        } else {
+            setStatus(`⚠️ تمت المزامنة جزئياً: ${uploaded} سجل رُفع، ${failed} فشل. راجع Console للتفاصيل.`, 'warning');
+            showNotification(`⚠️ رُفع ${uploaded} سجل — ${failed} سجل فشل.`, 'warning');
+        }
+    } catch (err) {
+        console.error('[forceCloudUploadFromMemory]', err);
+        setStatus(`❌ فشل الرفع: ${err.message || 'خطأ غير معروف'}`, 'error');
+        showNotification('❌ فشل الرفع للسحاب. راجع Console للتفاصيل.', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> رفع كل البيانات للسحاب الآن'; }
+    }
+}
+window.forceCloudUploadFromMemory = forceCloudUploadFromMemory;
+
 function saveTreasuryArchiveHour(hour) {
     const h = parseInt(hour, 10);
     if (!db._settings) db._settings = {};

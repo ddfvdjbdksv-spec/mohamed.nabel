@@ -1985,6 +1985,25 @@
                         مع الحالية.
                     </p>
                 </div>
+
+                <!-- Cloud Force Upload Card -->
+                <div class="card" id="cloud-force-upload-card" style="border-top: 5px solid #8b5cf6; padding: 2.5rem; background: linear-gradient(145deg, #faf5ff, #fff);">
+                    <div style="text-align: center; margin-bottom: 2rem;">
+                        <div style="width: 80px; height: 80px; background: rgba(139, 92, 246, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem;">
+                            <i class="fas fa-cloud-upload-alt" style="font-size: 2.5rem; color: #8b5cf6;"></i>
+                        </div>
+                        <h2 style="font-weight: 800; color: #7c3aed;">رفع البيانات للسحاب ☁️</h2>
+                        <p style="color: var(--text-muted); margin-top: 1rem;">يقارن البيانات الحالية بما هو موجود في السحاب ويرفع أي شيء ناقص تلقائياً.</p>
+                    </div>
+                    <div id="cloud-upload-status" style="display:none; padding:.9rem 1.2rem; border-radius:12px; margin-bottom:1.2rem; font-weight:600; font-size:.9rem; text-align:center;"></div>
+                    <button id="btn-force-cloud-upload" class="btn btn-primary" onclick="forceCloudUploadFromMemory()"
+                        style="width: 100%; height: 60px; font-size: 1.1rem; border-radius: 15px; background: linear-gradient(135deg,#8b5cf6,#6d28d9); box-shadow: 0 10px 20px rgba(139,92,246,0.25); border:none; color:#fff; font-weight:800; cursor:pointer;">
+                        <i class="fas fa-cloud-upload-alt"></i> رفع كل البيانات للسحاب الآن
+                    </button>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); text-align: center; margin-top: 1.5rem;">
+                        <i class="fas fa-info-circle"></i> يعمل حتى لو بعت ملف data.js — يرفع كل اللي في الجهاز حالياً.
+                    </p>
+                </div>
             </div>
 
             <div class="stats-grid"
