@@ -353,9 +353,21 @@ const CloudSync = (() => {
     }
 
     // ☁️ رفع كامل وانتظار انتهائه — يُستخدم بعد استعادة نسخة احتياطية
-    async function forceFullUpload() {
+    // parsedData اختياري: لو اتبعتت، بيرفع منها مباشرة بدون ما يعتمد على db في الذاكرة
+    async function forceFullUpload(parsedData) {
         if (!ready) throw new Error('CloudSync not ready');
-        console.log('[CloudSync] 🚀 forceFullUpload — رفع كامل لجميع الجداول...');
+
+        // لو اتبعت بيانات مباشرة (من ملف استعادة) — ارفعها فوراً بدون db
+        if (parsedData && typeof parsedData === 'object') {
+            console.log('[CloudSync] 🚀 forceFullUpload من بيانات مباشرة...');
+            return _pushRawData(parsedData);
+        }
+
+        // وإلا ارفع من db في الذاكرة (الحالة العادية)
+        console.log('[CloudSync] 🚀 forceFullUpload من الذاكرة...');
+        // أعد تصفير الـ hashes عشان نضمن رفع كل حاجة
+        hashes = {};
+        saveHashes();
         const results = await Promise.allSettled([
             ...SYNC_TABLES.map(t => pushTableDiff(t)),
             pushSettings()
@@ -364,8 +376,58 @@ const CloudSync = (() => {
         if (failed.length > 0) {
             failed.forEach(f => console.warn('[CloudSync] forceFullUpload partial fail:', f.reason));
         }
-        console.log(`[CloudSync] ✅ forceFullUpload انتهى — ${results.length - failed.length}/${results.length} جدول تم رفعه`);
+        console.log(`[CloudSync] ✅ forceFullUpload انتهى — ${results.length - failed.length}/${results.length} جدول`);
         return { total: results.length, failed: failed.length };
+    }
+
+    // رفع بيانات خام من كائن parsed مباشرة لـ Firestore (لا يعتمد على db في الذاكرة)
+    async function _pushRawData(data) {
+        if (!ready || !fsDB) throw new Error('CloudSync not ready');
+        const CHUNK = 400;
+        let totalUploaded = 0;
+        let totalFailed = 0;
+
+        for (const table of SYNC_TABLES) {
+            const arr = Array.isArray(data[table]) ? data[table] : [];
+            if (arr.length === 0) continue;
+            const col = fsDB.collection(table);
+            console.log(`[CloudSync] 📤 رفع ${arr.length} سجل من جدول ${table}...`);
+            for (let i = 0; i < arr.length; i += CHUNK) {
+                const chunk = arr.slice(i, i + CHUNK);
+                const batch = fsDB.batch();
+                chunk.forEach(rec => {
+                    if (rec == null || rec.id === undefined) return;
+                    const ref = col.doc(String(rec.id));
+                    batch.set(ref, { ...sanitize(rec), _syncedAt: Date.now() }, { merge: true });
+                });
+                try {
+                    await batch.commit();
+                    totalUploaded += chunk.length;
+                    console.log(`[CloudSync] ✅ ${table}: تم رفع ${chunk.length} سجل`);
+                } catch (err) {
+                    totalFailed += chunk.length;
+                    console.error(`[CloudSync] ❌ فشل رفع ${table}:`, err);
+                }
+            }
+        }
+
+        // رفع الإعدادات لو موجودة
+        if (data._settings) {
+            try {
+                await fsDB.collection('meta').doc('settings')
+                    .set({ ...sanitize(data._settings), _syncedAt: Date.now() }, { merge: true });
+                console.log('[CloudSync] ✅ الإعدادات تم رفعها');
+            } catch (err) {
+                console.warn('[CloudSync] ❌ فشل رفع الإعدادات:', err);
+            }
+        }
+
+        // بعد الرفع: أعد تصفير الـ hashes عشان بعد الريلود يتزامن صح
+        hashes = {};
+        saveHashes();
+
+        console.log(`[CloudSync] 🎉 _pushRawData انتهى — ${totalUploaded} سجل تم رفعه، ${totalFailed} فشل`);
+        return { total: totalUploaded + totalFailed, uploaded: totalUploaded, failed: totalFailed };
     }
 
     async function syncTableNow(table) {
