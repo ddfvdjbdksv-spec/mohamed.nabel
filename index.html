@@ -7,8 +7,8 @@
     <meta name="theme-color" content="#4f46e5">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="مستر محمد نبيل">
-    <title>مستر محمد نبيل</title>
+    <meta name="apple-mobile-web-app-title" content="سنتر البنا">
+    <title>سنتر البنا</title>
     <style>
         .search-results-dropdown {
             position: absolute;
@@ -103,14 +103,14 @@
                 <div class="splash-logo" style="margin-bottom: 1.5rem;">
                     <i class="fas fa-university"></i>
                 </div>
-                <h1 class="splash-title">مستر محمد نبيل</h1>
+                <h1 class="splash-title" id="splash-app-title">سنتر البنا</h1>
                 <p class="splash-subtitle">نظام الإدارة المتكامل</p>
 
                 <div id="password-screen">
                     <p style="color: var(--text-muted); margin-bottom: 2rem; font-size: 1.1rem;">يرجى إدخال كلمة المرور
                         للمتابعة</p>
                     <div style="display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 2rem;">
-                        <input type="password" id="app-password-input" class="form-input"
+                        <input type="password" id="app-password-input" class="form-input" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false"
                             style="width: 280px; text-align: center; font-size: 2rem; letter-spacing: 12px; height: 70px; margin-bottom: 0; background: #fff; border: 2px solid var(--primary-light); color: var(--text-main); border-radius: 20px; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.14);"
                             placeholder="••••" maxlength="8" oninput="checkAppPassword(this.value)">
                     </div>
@@ -163,7 +163,7 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="logo">
-            <i class="fas fa-book-open"></i> مستر محمد نبيل
+            <i class="fas fa-book-open"></i> سنتر البنا
         </div>
         <div id="current-grade-badge"
             style="text-align: center; margin-bottom: 1.5rem; padding: 0.5rem; background: var(--bg-light); border-radius: 10px; font-weight: 700; color: var(--primary);">
@@ -364,9 +364,9 @@
                         ... الدراسية</div>
                     <div class="avatar">M</div>
                     <div style="display:flex; flex-direction:column; line-height:1.2;">
-                        <span style="font-weight: 600;">مستر محمد نبيل</span>
+                        <span style="font-weight: 600;">سنتر البنا</span>
                         <small class="user-specialization"
-                            style="font-size:0.65rem; opacity:0.7; font-weight:400;">مدرس لغة عربية</small>
+                            style="font-size:0.65rem; opacity:0.7; font-weight:400;">لإعداد الأوائل</small>
                     </div>
                 </div>
             </div>
@@ -3467,9 +3467,9 @@
         <script src="category-system.js"></script>
         <script src="code-generator.js"></script>
         <script src="archive_functions.js?v=5"></script>
-        <script src="app.js?v=10"></script>
+        <script src="app.js?v=13"></script>
         <script src="user-management.js?v=2"></script>
-        <script src="firebase-sync.js?v=4"></script>
+        <script src="firebase-sync.js?v=10"></script>
         <script src="pending-operations-display.js"></script>
         <script src="platform-subscriptions.js?v=2"></script>
         <script src="transfer-student.js?v=2"></script>

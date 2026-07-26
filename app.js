@@ -201,6 +201,52 @@ window.RBAC = RBAC;
 
 // --- Database & Persistence ---
 // --- Database & Persistence ---
+function slugifyAppTenantPart(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+}
+
+function resolveAppTenantId() {
+    const initialData = window.edu_initial_data || {};
+    const initialSettings = initialData.settings || {};
+    const profile = initialSettings.appProfile || initialData.appProfile || {};
+    const explicit = window.CLOUD_SYNC_TENANT_ID || initialData.cloudSyncTenantId || initialData.tenantId || initialSettings.cloudSyncTenantId;
+    const fromProfile = [
+        profile.centerName,
+        profile.teacherName,
+        profile.specialization
+    ].map(slugifyAppTenantPart).filter(Boolean).join('-');
+    const fallback = slugifyAppTenantPart(location.hostname + '-' + location.pathname.replace(/\/[^/]*$/, '')) || 'default';
+    return slugifyAppTenantPart(explicit) || fromProfile || fallback;
+}
+
+const APP_TENANT_ID = resolveAppTenantId();
+window.APP_TENANT_ID = APP_TENANT_ID;
+window.CLOUD_SYNC_TENANT_ID = window.CLOUD_SYNC_TENANT_ID || APP_TENANT_ID;
+
+(function resetLocalAppStateWhenTenantChanges() {
+    const key = 'edu_active_tenant_id';
+    let previous = null;
+    try { previous = localStorage.getItem(key); } catch (e) { }
+    if (previous && previous !== APP_TENANT_ID) {
+        const prefixes = [
+            'edu_', '_fallback_', '_defaultGroupsSeeded', 'dailyTreasury',
+            'dt_', 'treasuryArchiveHour', 'activity_log'
+        ];
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const storageKey = localStorage.key(i);
+            if (storageKey && prefixes.some(prefix => storageKey.startsWith(prefix))) {
+                localStorage.removeItem(storageKey);
+            }
+        }
+    }
+    try { localStorage.setItem(key, APP_TENANT_ID); } catch (e) { }
+})();
+
 let currentGrade = localStorage.getItem('edu_active_grade') || null;
 let currentGroupId = localStorage.getItem('edu_active_group') || null;
 
@@ -255,7 +301,7 @@ const StorageEngine = {
     db: null,
     async init() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open("EduMasterLargeDB", 5);
+            const request = indexedDB.open("EduMasterLargeDB_" + APP_TENANT_ID, 5);
             request.onerror = (e) => reject("IndexedDB error: " + e.target.errorCode);
             request.onupgradeneeded = (e) => {
                 const db = e.target.result;
@@ -6681,7 +6727,7 @@ function sendStudentQRWhatsApp(type) {
 
     const profile = typeof getProgramProfile === 'function' ? getProgramProfile() : {};
     const teacherName = typeof getTeacherDisplayName === 'function' ? getTeacherDisplayName() : 'أستاذ المادة';
-    const spec = profile.specialization || 'مدرس رياضيات';
+    const spec = profile.specialization || 'لإعداد الأوائل';
 
     let msg = '';
     if (typeof buildFormalParentMessage === 'function') {
@@ -9389,7 +9435,7 @@ function sendMonthlyReportWhatsApp() {
     // 🔧 الاسم مثبّت دائماً "نظام إدارة الدروس" — لا يعتمد على الإعدادات المحفوظة
     const teacherLine = {
         name: getTeacherDisplayName(),
-        spec: _profileWA.specialization || 'مدرس رياضيات'
+        spec: _profileWA.specialization || 'لإعداد الأوائل'
     };
     const examsSection = examsAttended.length > 0
         ? examsAttended.map(r => {
@@ -9453,7 +9499,7 @@ function renderMonthlyReportBody() {
     const gradeObj = (typeof gradesList !== 'undefined') ? gradesList.find(g => String(g.id) === String(s.grade)) : null;
 
     // ── Header info ──
-    document.getElementById('report-teacher-name').innerText = `${getTeacherDisplayName()} — ${profile.specialization || 'مدرس رياضيات'}`;
+    document.getElementById('report-teacher-name').innerText = `${getTeacherDisplayName()} — ${profile.specialization || 'لإعداد الأوائل'}`;
     document.getElementById('report-date-range').innerText = `للفترة: ${period.label}`;
     document.getElementById('rep-st-name').innerText = s.name;
     document.getElementById('rep-st-code').innerText = s.qrCode || '---';
@@ -10120,6 +10166,7 @@ async function importData(input) {
 
             const success = await hydrateDatabase(parsedData);
             if (success) {
+                await db.load();
                 showNotification('✅ تم استعادة البيانات بنجاح! جاري الرفع على السحاب...', 'success');
 
                 // ☁️ رفع البيانات المستعادة على Firebase تلقائياً
@@ -10127,7 +10174,7 @@ async function importData(input) {
                 try {
                     if (typeof CloudSync !== 'undefined' && CloudSync.isReady && CloudSync.isReady()) {
                         showNotification('☁️ جاري مزامنة البيانات مع السحاب... يرجى الانتظار', 'info');
-                        const result = await CloudSync.forceFullUpload(parsedData);
+                        const result = await CloudSync.forceFullUpload();
                         showNotification(`✅ تمت المزامنة! تم رفع ${result.uploaded ?? result.total} سجل للسحاب`, 'success');
                     } else if (typeof CloudSync !== 'undefined' && CloudSync.init) {
                         // السحاب لم يتصل بعد — ننتظر الاتصال ثم نرفع
@@ -10139,7 +10186,7 @@ async function importData(input) {
                                 if (CloudSync.isReady && CloudSync.isReady()) {
                                     clearInterval(check);
                                     try {
-                                        const result = await CloudSync.forceFullUpload(parsedData);
+                                        const result = await CloudSync.forceFullUpload();
                                         showNotification(`✅ تمت المزامنة! تم رفع ${result.uploaded ?? result.total} سجل`, 'success');
                                     } catch (e) { console.warn('[Import→Cloud] forceFullUpload failed:', e); }
                                     resolve();
@@ -10455,17 +10502,21 @@ function initExperienceEnhancements() {
 function getProgramProfile() {
     if (!db._settings.appProfile) {
         db._settings.appProfile = {
-            centerName: 'مستر محمد نبيل',
-            teacherName: 'مستر محمد نبيل',
-            specialization: 'مدرس رياضيات',
+            centerName: 'سنتر البنا',
+            appTitle: 'نظام إدارة الدروس',
+            teacherName: 'سنتر البنا',
+            specialization: 'لإعداد الأوائل',
             phone: '',
             absenceMessage: 'السلام عليكم ورحمة الله وبركاته،\nنحيط سيادتكم علماً بأن الطالب/ـة {StudentName} لم يحضر/تحضر الحصة الدراسية اليوم.\nنرجو التكرم بمتابعة سبب الغياب.',
             reportMessage: 'السلام عليكم ورحمة الله وبركاته،\nنرفق لسيادتكم تقرير الأداء الشهري للطالب/ـة {StudentName}.\nنسأل الله لابنكم/ابنتكم دوام التوفيق والنجاح.'
         };
     }
     // ✅ توافق مع الملفات القديمة: تأكد من وجود الحقول الجديدة دائماً
-    if (!db._settings.appProfile.specialization || db._settings.appProfile.specialization === 'أستاذ الرياضيات') {
-        db._settings.appProfile.specialization = 'مدرس رياضيات';
+    if (!db._settings.appProfile.specialization) {
+        db._settings.appProfile.specialization = 'لإعداد الأوائل';
+    }
+    if (!db._settings.appProfile.appTitle) {
+        db._settings.appProfile.appTitle = db._settings.appProfile.centerName || 'نظام إدارة الدروس';
     }
     if (db._settings.appProfile.absenceMessage === undefined) {
         db._settings.appProfile.absenceMessage = 'السلام عليكم ورحمة الله وبركاته،\nنحيط سيادتكم علماً بأن الطالب/ـة {StudentName} لم يحضر/تحضر الحصة الدراسية اليوم.\nنرجو التكرم بمتابعة سبب الغياب.';
@@ -10473,11 +10524,11 @@ function getProgramProfile() {
     if (db._settings.appProfile.reportMessage === undefined) {
         db._settings.appProfile.reportMessage = 'السلام عليكم ورحمة الله وبركاته،\nنرفق لسيادتكم تقرير الأداء الشهري للطالب/ـة {StudentName}.\nنسأل الله لابنكم/ابنتكم دوام التوفيق والنجاح.';
     }
-    if (!db._settings.appProfile.teacherName || db._settings.appProfile.teacherName === 'نظام إدارة الدروس' || db._settings.appProfile.teacherName === 'سنتر العباقرة') {
-        db._settings.appProfile.teacherName = 'مستر محمد نبيل';
+    if (!db._settings.appProfile.teacherName || db._settings.appProfile.teacherName === 'نظام إدارة الدروس' || db._settings.appProfile.teacherName === 'سنتر العباقرة' || db._settings.appProfile.teacherName === 'مستر محمد نبيل' || db._settings.appProfile.teacherName === 'سنتر البنا لإعداد الأوائل') {
+        db._settings.appProfile.teacherName = 'سنتر البنا';
     }
-    if (!db._settings.appProfile.centerName || db._settings.appProfile.centerName === 'نظام إدارة الدروس' || db._settings.appProfile.centerName === 'سنتر العباقرة') {
-        db._settings.appProfile.centerName = 'مستر محمد نبيل';
+    if (!db._settings.appProfile.centerName || db._settings.appProfile.centerName === 'نظام إدارة الدروس' || db._settings.appProfile.centerName === 'سنتر العباقرة' || db._settings.appProfile.centerName === 'مستر محمد نبيل' || db._settings.appProfile.centerName === 'سنتر البنا لإعداد الأوائل') {
+        db._settings.appProfile.centerName = 'سنتر البنا';
     }
 
     return db._settings.appProfile;
@@ -10486,7 +10537,7 @@ function getProgramProfile() {
 /** يعيد اسم المدرس المحفوظ في الإعدادات، أو نص بديل إن لم يُعيَّن */
 function getTeacherDisplayName() {
     const profile = getProgramProfile();
-    return (profile.teacherName && profile.teacherName.trim()) ? profile.teacherName.trim() : 'مستر محمد نبيل';
+    return (profile.teacherName && profile.teacherName.trim()) ? profile.teacherName.trim() : 'سنتر البنا';
 }
 
 /** يعيد نص رسالة الغياب بعد استبدال {StudentName} باسم الطالب */
@@ -10508,7 +10559,7 @@ function buildReportMessageForStudent(studentName) {
 function getTeacherSignatureLine() {
     const name = getTeacherDisplayName();
     const profile = getProgramProfile();
-    const spec = profile.specialization || 'مدرس رياضيات';
+    const spec = profile.specialization || 'لإعداد الأوائل';
     return `\n\n━━━━━━━━━━━━━━\n*${name}*\n${spec}`;
 }
 // للتوافق مع الأكواد القديمة التي تستخدم TEACHER_FIXED_NAME مباشرة
@@ -10662,7 +10713,7 @@ function viewFinancialEditLog() {
             th { background:#4f46e5; color:#fff; }
         </style></head><body>
         <h2><i class="fas fa-history"></i> سجل التعديلات المالية على الأرشيف</h2>
-        <div class="sub">${getTeacherDisplayName()} — ${profile.specialization || 'مدرس رياضيات'}</div>
+        <div class="sub">${getTeacherDisplayName()} — ${profile.specialization || 'لإعداد الأوائل'}</div>
         <table>
             <thead><tr>
                 <th>اسم الطالب</th><th>الشهر / الدورة</th><th>الحالة القديمة</th><th>الحالة الجديدة</th>
@@ -10679,16 +10730,20 @@ function viewFinancialEditLog() {
 
 function applyProgramProfile() {
     const profile = getProgramProfile();
-    document.title = `${profile.centerName} | نظام الإدارة`;
+    const appTitle = (profile.appTitle && profile.appTitle.trim()) ? profile.appTitle.trim() : (profile.centerName || 'نظام إدارة الدروس');
+    document.title = `${appTitle} | نظام الإدارة`;
+
+    const splashTitle = document.getElementById('splash-app-title');
+    if (splashTitle) splashTitle.innerText = appTitle;
 
     const logo = document.querySelector('.logo');
-    if (logo) logo.innerHTML = `<i class="fas fa-book-open"></i> ${profile.centerName || 'مستر محمد نبيل'}`;
+    if (logo) logo.innerHTML = `<i class="fas fa-book-open"></i> ${profile.centerName || 'سنتر البنا'}`;
 
     const userName = document.querySelector('.user-profile span');
     if (userName) userName.innerText = getTeacherDisplayName();
 
     const userSpec = document.querySelector('.user-profile .user-specialization');
-    if (userSpec) userSpec.innerText = profile.specialization || 'مدرس رياضيات';
+    if (userSpec) userSpec.innerText = profile.specialization || 'لإعداد الأوائل';
 }
 
 function initProgramSettings() {
@@ -10735,12 +10790,16 @@ function ensureSettingsSection() {
                     <input id="settings-center-name" class="form-input" type="text">
                 </div>
                 <div class="settings-row">
+                    <label for="settings-app-title">اسم البرنامج في شاشة الدخول</label>
+                    <input id="settings-app-title" class="form-input" type="text" placeholder="مثال: نظام إدارة الدروس">
+                </div>
+                <div class="settings-row">
                     <label for="settings-teacher-name">اسم المدرس</label>
                     <input id="settings-teacher-name" class="form-input" type="text" placeholder="مثال: محمد أحمد">
                 </div>
                 <div class="settings-row">
                     <label for="settings-specialization">التخصص / الوظيفة</label>
-                    <input id="settings-specialization" class="form-input" type="text" placeholder="مثال: مدرس رياضيات">
+                    <input id="settings-specialization" class="form-input" type="text" placeholder="مثال: لإعداد الأوائل">
                 </div>
                 <div class="settings-row">
                     <label for="settings-phone">رقم التواصل</label>
@@ -10891,6 +10950,7 @@ function renderProgramSettings() {
 
     const profile = getProgramProfile();
     const center = document.getElementById('settings-center-name');
+    const appTitle = document.getElementById('settings-app-title');
     const teacher = document.getElementById('settings-teacher-name');
     const specialization = document.getElementById('settings-specialization');
     const phone = document.getElementById('settings-phone');
@@ -10900,6 +10960,7 @@ function renderProgramSettings() {
     const zoom = document.getElementById('settings-zoom-label');
 
     if (center) center.value = profile.centerName || '';
+    if (appTitle) appTitle.value = profile.appTitle || profile.centerName || '';
     // ✅ اسم المدرس الآن يُقرأ من الإعدادات مباشرة (يعبّئه المدير بنفسه)
     if (teacher) teacher.value = profile.teacherName || '';
     if (specialization) specialization.value = profile.specialization || '';
@@ -10934,9 +10995,10 @@ function renderProgramSettings() {
 function saveProgramSettings() {
     const profile = getProgramProfile();
     profile.centerName = document.getElementById('settings-center-name')?.value.trim() || 'نظام إدارة الدروس';
+    profile.appTitle = document.getElementById('settings-app-title')?.value.trim() || profile.centerName || 'نظام إدارة الدروس';
     // ✅ اسم المدرس يُحفظ من حقل الإدخال مباشرة (يُدخله المدير مرة واحدة)
     profile.teacherName = document.getElementById('settings-teacher-name')?.value.trim() || '';
-    profile.specialization = document.getElementById('settings-specialization')?.value.trim() || 'مدرس رياضيات';
+    profile.specialization = document.getElementById('settings-specialization')?.value.trim() || 'لإعداد الأوائل';
     profile.phone = document.getElementById('settings-phone')?.value.trim() || '';
 
     // ✅ حفظ نصوص الرسائل
@@ -10953,6 +11015,7 @@ function saveProgramSettings() {
     const printWidth = document.getElementById('settings-print-width')?.value || '80mm';
     localStorage.setItem('alamin_print_width', printWidth);
     localStorage.setItem('edu_master_settings', JSON.stringify(db._settings));
+    db.save();
 
     applyProgramProfile();
     updateExperienceSummary();
@@ -11068,6 +11131,8 @@ async function importPlatformCourseCodes() {
 function printPlatformCourseCards() {
     const rows = getPlatformCodesFiltered();
     if (!rows.length) return showNotification('لا توجد أكواد للطباعة', 'warning');
+    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : {};
+    const teacherName = (typeof getTeacherDisplayName === 'function') ? getTeacherDisplayName() : (profile.teacherName || 'نظام إدارة الدروس');
     const html = `
     <html dir="rtl"><head><title>أكواد المنصة</title>
     <style>
@@ -11084,7 +11149,7 @@ function printPlatformCourseCards() {
       <div class="grid">
         ${rows.map(item => `
           <div class="card">
-            <div class="title">نظام إدارة الدروس - كود تفعيل كورس</div>
+            <div class="title">${teacherName} - كود تفعيل كورس</div>
             <div class="student">${item.linkedStudentName || 'طالب غير محدد'}</div>
             <div class="meta">${platformGradeLabel(item.grade)} | ${item.courseTitle || '-'}</div>
             <div class="code">${item.code || '-'}</div>
@@ -11197,6 +11262,7 @@ window.initPlatformCodesSection = initPlatformCodesSection;
 window.onload = async () => {
     try {
         await ensureAppLoaded();
+        if (typeof applyProgramProfile === 'function') applyProgramProfile();
     } catch (err) {
         return;
     }
@@ -11316,7 +11382,7 @@ const exposures = {
 
     // Data & Sync
     exportData, exportStudentsToFirebase, importData, importFromFolder, showCycleArchive, viewArchivedCycle,
-    applyAppTheme, toggleDayNightMode, initExperienceEnhancements, updateExperienceSummary,
+    applyAppTheme, toggleDayNightMode, initExperienceEnhancements, updateExperienceSummary, applyProgramProfile,
     initProgramSettings, renderProgramSettings, saveProgramSettings,
     prepareHandoverDownload: async () => {
         showNotification('جاري تجهيز نسخة كاملة للنقل...', 'info');
@@ -11790,7 +11856,10 @@ function checkAppPassword(val) {
             successDiv.innerHTML = `<i class="fas fa-check-circle"></i> تم تسجيل الدخول بنجاح!`;
         }
         const passwordInput = document.getElementById('app-password-input');
-        if (passwordInput) passwordInput.disabled = true;
+        if (passwordInput) {
+            passwordInput.value = '';
+            passwordInput.disabled = true;
+        }
 
         if (typeof proceedAfterPasswordSuccess === 'function') {
             // user-management.js متاح: يقرر هو لو محتاج يعرض شاشة "من أنت؟"
@@ -11901,7 +11970,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         splash.style.display = 'flex';
         // تأخير بسيط لضمان ظهور الـ splash قبل أي عملية ثقيلة
         await new Promise(r => setTimeout(r, 50));
-        document.getElementById('app-password-input')?.focus();
+        const passwordInput = document.getElementById('app-password-input');
+        if (passwordInput) {
+            passwordInput.value = '';
+            passwordInput.setAttribute('autocomplete', 'new-password');
+            passwordInput.focus();
+        }
     }
 
     try {
@@ -11923,6 +11997,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // النظام لو فشلت أو لو مفيش إنترنت؛ النظام يعمل محليًا زي العادة ──
         if (typeof CloudSync !== 'undefined') {
             await CloudSync.init().catch(e => console.warn('[CloudSync] init error', e));
+            if (typeof applyProgramProfile === 'function') applyProgramProfile();
         }
     } catch (err) {
         // حتى لو فشل التحميل، تبقى شاشة المرور ظاهرة

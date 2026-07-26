@@ -175,7 +175,34 @@ const FIREBASE_CONFIG = {
 };
 let fsDB=null,studentId=null,studentData=null;
 let allData={students:[],groups:[],attendance:[],absenceSessions:[],exams:[],scores:[],payments:[],cycles:[],settings:{}};
-let periods=[],periodIdx=0,unsubs=[];
+let periods=[],periodIdx=0,unsubs=[],discoveredTenants=[];
+
+function slugifyTenantPart(value) {
+    return String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+}
+
+function resolveTenantId() {
+    try {
+        const stored = localStorage.getItem('cloud_sync_tenant_id_' + FIREBASE_CONFIG.projectId);
+        if (stored) return stored;
+    } catch(e){}
+    const fallback = slugifyTenantPart(location.hostname + '-' + location.pathname.replace(/\/[^/]*$/, '')) || 'default';
+    return fallback;
+}
+
+function matchesStudent(s, queryStr) {
+    if (!s || !queryStr) return false;
+    const targetStr = String(queryStr).trim();
+    return String(s.id).trim() === targetStr ||
+           String(s.qrCode || '').trim() === targetStr ||
+           String(s.centerCode || '').trim() === targetStr ||
+           String(s.platformCode || '').trim() === targetStr;
+}
 
 window.addEventListener('DOMContentLoaded',async()=>{
     const p=new URLSearchParams(window.location.search);
@@ -192,43 +219,110 @@ window.addEventListener('DOMContentLoaded',async()=>{
 
 async function loadAll(){
     const tables=['students','groups','attendance','absenceSessions','exams','scores','payments','cycles'];
-    await Promise.all(tables.map(async t=>{
-        const snap=await fsDB.collection(t).get({ source: 'server' });
-        allData[t]=[];
-        snap.forEach(d=>{const id=isNaN(Number(d.id))?d.id:Number(d.id);allData[t].push({...d.data(),id});});
-    }));
+    const tenantSet = new Set([resolveTenantId()]);
 
     try {
-        const sDoc = await fsDB.collection('meta').doc('settings').get({ source: 'server' });
-        if(sDoc.exists) allData.settings = sDoc.data();
+        const tenantsSnap = await fsDB.collection('_tenants').get();
+        if (tenantsSnap && !tenantsSnap.empty) {
+            tenantsSnap.forEach(doc => tenantSet.add(doc.id));
+        }
     } catch(e) {}
 
-    studentData=allData.students.find(s=>String(s.id)===String(studentId));
+    discoveredTenants = Array.from(tenantSet);
+
+    await Promise.all(tables.map(async t => {
+        let recordsMap = new Map();
+
+        // 1. القراءة من جميع مجموعات المستأجرين _tenants/{tenantId}/{t}
+        for (const tid of discoveredTenants) {
+            try {
+                const snap = await fsDB.collection('_tenants').doc(tid).collection(t).get();
+                snap.forEach(d => {
+                    const id = isNaN(Number(d.id)) ? d.id : Number(d.id);
+                    recordsMap.set(String(id), { ...d.data(), id });
+                });
+            } catch(e) {}
+        }
+
+        // 2. القراءة من المجموعات الرئيسية (Root Collection) كـ Fallback
+        try {
+            const rSnap = await fsDB.collection(t).get();
+            rSnap.forEach(d => {
+                const id = isNaN(Number(d.id)) ? d.id : Number(d.id);
+                if (!recordsMap.has(String(id))) {
+                    recordsMap.set(String(id), { ...d.data(), id });
+                }
+            });
+        } catch(e) {}
+
+        allData[t] = Array.from(recordsMap.values());
+    }));
+
+    // قراءة الإعدادات settings
+    for (const tid of discoveredTenants) {
+        try {
+            const sDoc = await fsDB.collection('_tenants').doc(tid).collection('meta').doc('settings').get();
+            if (sDoc.exists) { allData.settings = { ...allData.settings, ...sDoc.data() }; }
+        } catch(e) {}
+    }
+    try {
+        const rSDoc = await fsDB.collection('meta').doc('settings').get();
+        if (rSDoc.exists) { allData.settings = { ...allData.settings, ...rSDoc.data() }; }
+    } catch(e) {}
+
+    studentData = allData.students.find(s => matchesStudent(s, studentId));
     if(!studentData){showError('لم يتم العثور على بيانات هذا الطالب');return;}
     renderHeader();buildPeriods();renderReport();showPage();
 }
 
 function attachListeners(){
     const tables=['students','groups','attendance','absenceSessions','exams','scores','payments','cycles'];
-    tables.forEach(t=>{
-        const u=fsDB.collection(t).onSnapshot({ includeMetadataChanges: true }, snap=>{
-            if(snap.metadata && snap.metadata.fromCache) return;
-            allData[t]=[];
-            snap.forEach(d=>{const id=isNaN(Number(d.id))?d.id:Number(d.id);allData[t].push({...d.data(),id});});
-            studentData=allData.students.find(s=>String(s.id)===String(studentId));
-            if(!studentData)return;
-            buildPeriods();renderReport();
-            document.getElementById('last-update').textContent='آخر تحديث: '+new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-        },e=>console.warn(t,e));
-        unsubs.push(u);
+
+    const refreshTableFromSnap = (t, snap) => {
+        let recordsMap = new Map();
+        (allData[t] || []).forEach(r => recordsMap.set(String(r.id), r));
+        snap.forEach(d => {
+            const id = isNaN(Number(d.id)) ? d.id : Number(d.id);
+            recordsMap.set(String(id), { ...d.data(), id });
+        });
+        allData[t] = Array.from(recordsMap.values());
+        studentData = allData.students.find(s => matchesStudent(s, studentId));
+        if(!studentData) return;
+        buildPeriods(); renderReport();
+        document.getElementById('last-update').textContent='آخر تحديث: '+new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    };
+
+    tables.forEach(t => {
+        discoveredTenants.forEach(tid => {
+            const u1 = fsDB.collection('_tenants').doc(tid).collection(t).onSnapshot({ includeMetadataChanges: true }, snap => {
+                if (snap.metadata && snap.metadata.fromCache) return;
+                refreshTableFromSnap(t, snap);
+            }, e => console.warn(`_tenants/${tid}/${t} listener error`, e));
+            unsubs.push(u1);
+        });
+
+        const u2 = fsDB.collection(t).onSnapshot({ includeMetadataChanges: true }, snap => {
+            if (snap.metadata && snap.metadata.fromCache) return;
+            refreshTableFromSnap(t, snap);
+        }, e => console.warn(`${t} root listener error`, e));
+        unsubs.push(u2);
     });
 
-    const su = fsDB.collection('meta').doc('settings').onSnapshot({ includeMetadataChanges: true }, doc=>{
-        if(doc.metadata && doc.metadata.fromCache) return;
-        if(doc.exists) allData.settings = doc.data();
-        if(studentData) { buildPeriods(); renderReport(); }
-    },e=>console.warn('settings listener error',e));
-    unsubs.push(su);
+    discoveredTenants.forEach(tid => {
+        const su1 = fsDB.collection('_tenants').doc(tid).collection('meta').doc('settings').onSnapshot({ includeMetadataChanges: true }, doc => {
+            if (doc.metadata && doc.metadata.fromCache) return;
+            if (doc.exists) allData.settings = { ...allData.settings, ...doc.data() };
+            if (studentData) { buildPeriods(); renderReport(); }
+        }, e => console.warn(`settings tenant ${tid} listener error`, e));
+        unsubs.push(su1);
+    });
+
+    const su2 = fsDB.collection('meta').doc('settings').onSnapshot({ includeMetadataChanges: true }, doc => {
+        if (doc.metadata && doc.metadata.fromCache) return;
+        if (doc.exists) allData.settings = { ...allData.settings, ...doc.data() };
+        if (studentData) { buildPeriods(); renderReport(); }
+    }, e => console.warn('settings root listener error', e));
+    unsubs.push(su2);
 }
 
 function periodKey(y,m){return y+'-'+String(m).padStart(2,'0');}

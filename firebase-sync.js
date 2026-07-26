@@ -39,6 +39,10 @@ const CloudSync = (() => {
         measurementId: "G-VDJCV0BST4"
     };
 
+    const TENANT_STORAGE_KEY = 'cloud_sync_tenant_id_' + FIREBASE_CONFIG.projectId;
+    let tenantId = null;
+    let tenantRoot = null;
+
     // نفس قائمة الجداول المستخدمة في IndexedDB (StorageEngine) بالضبط
     const SYNC_TABLES = [
         'students', 'attendance', 'exams', 'scores', 'expenses',
@@ -48,8 +52,8 @@ const CloudSync = (() => {
         'platformCourses', 'platformSubscriptions'
     ];
 
-    const HASH_STORAGE_KEY = 'cloud_sync_hashes_' + FIREBASE_CONFIG.projectId;
-    const LAST_SYNC_KEY = 'cloud_sync_last_time_' + FIREBASE_CONFIG.projectId;
+    let HASH_STORAGE_KEY = 'cloud_sync_hashes_' + FIREBASE_CONFIG.projectId;
+    let LAST_SYNC_KEY = 'cloud_sync_last_time_' + FIREBASE_CONFIG.projectId;
 
     let fsDB = null;
     let ready = false;
@@ -95,10 +99,147 @@ const CloudSync = (() => {
         return h + '_' + str.length;
     }
     // Firestore بيرفض قيم undefined — لازم ننضّف الكائن قبل الإرسال
+    function slugifyTenantPart(value) {
+        return String(value || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}]+/gu, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 80);
+    }
+
+    function resolveTenantId() {
+        const initialData = window.edu_initial_data || {};
+        const settings = (typeof db !== 'undefined' && db && db._settings) ? db._settings : {};
+        const profile = settings.appProfile || initialData.appProfile || (initialData.settings && initialData.settings.appProfile) || {};
+        const explicit = window.CLOUD_SYNC_TENANT_ID || initialData.cloudSyncTenantId || initialData.tenantId || settings.cloudSyncTenantId;
+        const fromProfile = [
+            profile.centerName,
+            profile.teacherName,
+            profile.specialization
+        ].map(slugifyTenantPart).filter(Boolean).join('-');
+        const fallback = slugifyTenantPart(location.hostname + '-' + location.pathname.replace(/\/[^/]*$/, '')) || 'default';
+        const resolved = slugifyTenantPart(explicit) || fromProfile || fallback;
+        try { localStorage.setItem(TENANT_STORAGE_KEY, resolved); } catch (e) { }
+        return resolved;
+    }
+
+    function configureTenant() {
+        tenantId = resolveTenantId();
+        HASH_STORAGE_KEY = 'cloud_sync_hashes_' + FIREBASE_CONFIG.projectId + '_' + tenantId;
+        LAST_SYNC_KEY = 'cloud_sync_last_time_' + FIREBASE_CONFIG.projectId + '_' + tenantId;
+        tenantRoot = fsDB ? fsDB.collection('_tenants').doc(tenantId) : null;
+    }
+
+    function tableCollection(table) {
+        return tenantRoot.collection(table);
+    }
+
+    function legacyTableCollection(table) {
+        return fsDB.collection(table);
+    }
+
+    function deletionsCollection() {
+        return tenantRoot.collection('_deletions');
+    }
+
+    function settingsDocRef() {
+        return tenantRoot.collection('meta').doc('settings');
+    }
+
+    function legacySettingsDocRef() {
+        return fsDB.collection('meta').doc('settings');
+    }
+
     function sanitize(obj) {
         const out = {};
         Object.keys(obj || {}).forEach(k => { if (obj[k] !== undefined) out[k] = obj[k]; });
         return out;
+    }
+
+    const UPLOAD_COL_MAP = {
+        students: { id: 'id', name: 'nm', grade: 'gr', groupId: 'gid', qrCode: 'qr', phone: 'ph', parentPhone: 'pp', points: 'pt', notes: 'no', joinDate: 'jd', centerCode: 'cc', platformCode: 'pc', gender: 'gn', isExempt: 'ex' },
+        attendance: { id: 'id', studentId: 'sid', date: 'd', status: 's', sessionId: 'ssid', grade: 'gr', groupId: 'gid' },
+        payments: { id: 'id', studentId: 'sid', date: 'd', amount: 'am', category: 'cat', cycleId: 'cid', month: 'mo', year: 'yr', isExemption: 'xm', discount: 'dc', platformFee: 'pf', notes: 'no', groupId: 'gid', grade: 'gr' },
+        expenses: { id: 'id', date: 'd', amount: 'am', description: 'ds', grade: 'gr', groupId: 'gid', category: 'cat' },
+        exams: { id: 'id', title: 'ti', grade: 'gr', groupId: 'gid', maxMarks: 'mx', date: 'd' },
+        scores: { id: 'id', examId: 'eid', studentId: 'sid', mark: 'mk', date: 'd' },
+        absenceSessions: { id: 'id', date: 'd', grade: 'gr', groupId: 'gid', name: 'nm', presentIds: 'pid', absentIds: 'aid', note: 'no' },
+        dailyTreasuryArchives: { id: 'id', date: 'd', grade: 'gr', groupId: 'gid', sessionName: 'sn', totalSub: 'ts', totalMisc: 'tm', totalExp: 'te', total: 'tt', payments: 'py', expenses: 'ex' },
+        cycles: { id: 'id', title: 'ti', grade: 'gr', groupId: 'gid', startDate: 'sd', endDate: 'ed', isActive: 'ia', monthlyFee: 'mf' },
+        groups: { id: 'id', name: 'nm', grade: 'gr', time: 'ti', days: 'dy', capacity: 'cp', color: 'cl' },
+        handouts: { id: 'id', title: 'ti', grade: 'gr', groupId: 'gid', price: 'pr', date: 'd' },
+        studentHandouts: { id: 'id', studentId: 'sid', handoutId: 'hid', date: 'd', paid: 'pd', amount: 'am' },
+        rewards: { id: 'id', title: 'ti', grade: 'gr', pointsCost: 'pc', stock: 'st', icon: 'ic' },
+        quizzes: { id: 'id', title: 'ti', grade: 'gr', groupId: 'gid', questions: 'q', date: 'd' },
+        staff: { id: 'id', name: 'nm', role: 'ro', pin: 'pi', phone: 'ph', joinDate: 'jd', isActive: 'ia' },
+        shifts: { id: 'id', staffId: 'sid', date: 'd', type: 'tp', note: 'no' },
+        materials: { id: 'id', title: 'ti', grade: 'gr', groupId: 'gid', type: 'tp', url: 'ur', date: 'd' },
+        waQueue: { id: 'id', studentId: 'sid', message: 'ms', type: 'tp', date: 'd', status: 'st', phone: 'ph' },
+        platformCourses: { id: 'id', title: 'ti', grade: 'gr', price: 'pr', isActive: 'ia', platformCode: 'pc' },
+        platformSubscriptions: { id: 'id', studentId: 'sid', courseId: 'cid', date: 'd', expiryDate: 'ed', status: 'st', amount: 'am' },
+        courseCodes: { id: 'id', code: 'co', grade: 'gr', groupId: 'gid', used: 'us', usedBy: 'ub', date: 'd' },
+    };
+
+    function resolveUploadDict(v, dict) {
+        if (typeof v === 'string' && v.startsWith('~')) {
+            const idx = parseInt(v.slice(1), 10);
+            return dict[idx] !== undefined ? dict[idx] : v;
+        }
+        if (Array.isArray(v)) return v.map(x => resolveUploadDict(x, dict));
+        if (v && typeof v === 'object') {
+            const out = {};
+            Object.entries(v).forEach(([k, val]) => { out[k] = resolveUploadDict(val, dict); });
+            return out;
+        }
+        return v;
+    }
+
+    function decompressUploadTable(tableName, compressed) {
+        if (!compressed || !compressed._c) return Array.isArray(compressed) ? compressed : [];
+        const { cols, n } = compressed;
+        if (!n || !cols) return [];
+        const map = UPLOAD_COL_MAP[tableName] || {};
+        const rev = {};
+        Object.entries(map).forEach(([longKey, shortKey]) => { rev[shortKey] = longKey; });
+        const rows = [];
+        for (let i = 0; i < n; i++) {
+            const row = {};
+            Object.entries(cols).forEach(([shortKey, values]) => {
+                const longKey = rev[shortKey] || shortKey;
+                const v = Array.isArray(values) ? values[i] : undefined;
+                if (v !== null && v !== undefined) row[longKey] = v;
+            });
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    function normalizeUploadData(data) {
+        const source = data || {};
+        const normalized = {};
+
+        if (source.__version__ === 3 && source.tables) {
+            const dict = source.__dict__ || [];
+            Object.entries(source.tables).forEach(([tableName, compressed]) => {
+                const withDict = dict.length ? resolveUploadDict(compressed, dict) : compressed;
+                normalized[tableName] = decompressUploadTable(tableName, withDict);
+            });
+        }
+
+        SYNC_TABLES.forEach(table => {
+            if (!Array.isArray(normalized[table])) {
+                normalized[table] =
+                    (Array.isArray(source[table]) ? source[table] : null) ||
+                    (Array.isArray(source[`edu_${table}`]) ? source[`edu_${table}`] : null) ||
+                    (table === 'dailyTreasuryArchives' && Array.isArray(source.dailyTreasury) ? source.dailyTreasury : null) ||
+                    (table === 'payments' && Array.isArray(source.studentPayments) ? source.studentPayments : null) ||
+                    [];
+            }
+        });
+
+        normalized._settings = source._settings || source.settings || source.edu_master_settings || null;
+        return normalized;
     }
 
     // ── مؤشر الحالة الصغير في الواجهة (متصل / غير متصل / مزامنة) ──
@@ -207,7 +348,7 @@ const CloudSync = (() => {
             } catch (e) { }
 
             pendingTableRefreshes.clear();
-        }, 300);
+        }, 50);
     }
 
     function populateHashesFromLocal() {
@@ -242,12 +383,13 @@ const CloudSync = (() => {
             saveHashes();
         }
 
+        if (applyingRemote) return;
         if (!ready || !fsDB) return;
 
         try {
-            await fsDB.collection(table).doc(strId).delete();
+            await tableCollection(table).doc(strId).delete();
             const delDocId = `${table}_${strId}`;
-            await fsDB.collection('_deletions').doc(delDocId).set({
+            await deletionsCollection().doc(delDocId).set({
                 table, id: strId, _syncedAt: Date.now()
             }).catch(() => {});
             console.log(`[CloudSync] ✅ Document ${strId} deleted from ${table}`);
@@ -303,8 +445,7 @@ const CloudSync = (() => {
 
         setStatus('syncing');
         try {
-            await fsDB.collection('meta').doc('settings')
-                .set({ ...sanitize(db._settings), _syncedAt: Date.now() }, { merge: true });
+            await settingsDocRef().set({ ...sanitize(db._settings), _syncedAt: Date.now() }, { merge: true });
             hashes.__settings = h; // نحدّث الهاش بعد التأكد من نجاح الكتابة فقط
             saveHashes();
             setStatus(navigator.onLine ? 'online' : 'offline');
@@ -318,7 +459,7 @@ const CloudSync = (() => {
 
     async function flushOps(table, ops) {
         setStatus('syncing');
-        const col = fsDB.collection(table);
+        const col = tableCollection(table);
         const CHUNK = 400; // أقل من حد الـ 500 لكل batch في Firestore
         const tableHashes = hashes[table] || (hashes[table] = {});
 
@@ -363,34 +504,27 @@ const CloudSync = (() => {
             return _pushRawData(parsedData);
         }
 
-        // وإلا ارفع من db في الذاكرة (الحالة العادية)
         console.log('[CloudSync] 🚀 forceFullUpload من الذاكرة...');
-        // أعد تصفير الـ hashes عشان نضمن رفع كل حاجة
-        hashes = {};
-        saveHashes();
-        const results = await Promise.allSettled([
-            ...SYNC_TABLES.map(t => pushTableDiff(t)),
-            pushSettings()
-        ]);
-        const failed = results.filter(r => r.status === 'rejected');
-        if (failed.length > 0) {
-            failed.forEach(f => console.warn('[CloudSync] forceFullUpload partial fail:', f.reason));
-        }
-        console.log(`[CloudSync] ✅ forceFullUpload انتهى — ${results.length - failed.length}/${results.length} جدول`);
-        return { total: results.length, failed: failed.length };
+        const snapshot = {};
+        SYNC_TABLES.forEach(table => {
+            snapshot[table] = Array.isArray(db[table]) ? db[table] : [];
+        });
+        snapshot._settings = db._settings || {};
+        return _pushRawData(snapshot);
     }
 
     // رفع بيانات خام من كائن parsed مباشرة لـ Firestore (لا يعتمد على db في الذاكرة)
     async function _pushRawData(data) {
         if (!ready || !fsDB) throw new Error('CloudSync not ready');
+        const uploadData = normalizeUploadData(data);
         const CHUNK = 400;
         let totalUploaded = 0;
         let totalFailed = 0;
 
         for (const table of SYNC_TABLES) {
-            const arr = Array.isArray(data[table]) ? data[table] : [];
+            const arr = Array.isArray(uploadData[table]) ? uploadData[table] : [];
             if (arr.length === 0) continue;
-            const col = fsDB.collection(table);
+            const col = tableCollection(table);
             console.log(`[CloudSync] 📤 رفع ${arr.length} سجل من جدول ${table}...`);
             for (let i = 0; i < arr.length; i += CHUNK) {
                 const chunk = arr.slice(i, i + CHUNK);
@@ -412,10 +546,9 @@ const CloudSync = (() => {
         }
 
         // رفع الإعدادات لو موجودة
-        if (data._settings) {
+        if (uploadData._settings) {
             try {
-                await fsDB.collection('meta').doc('settings')
-                    .set({ ...sanitize(data._settings), _syncedAt: Date.now() }, { merge: true });
+                await settingsDocRef().set({ ...sanitize(uploadData._settings), _syncedAt: Date.now() }, { merge: true });
                 console.log('[CloudSync] ✅ الإعدادات تم رفعها');
             } catch (err) {
                 console.warn('[CloudSync] ❌ فشل رفع الإعدادات:', err);
@@ -468,14 +601,17 @@ const CloudSync = (() => {
         );
     }
 
-    // ── دمج ذكي للبيانات القادمة من السحابة مع البيانات المحلية ──
+    // ── دمج ذكي وآمن للبيانات القادمة من السحابة مع البيانات المحلية ──
+    // ⚠️ حماية مطلقة: لا يتم مسح أو حذف أي سجلات محليّة إطلاقاً أثناء التحديث أو المزامنة!
     async function mergeRemoteTable(table, remoteArr) {
-        const localArr = db[table] || [];
-        const tableHashes = hashes[table] || {};
-        const remoteIds = new Set(remoteArr.map(r => String(r.id)));
+        if (!Array.isArray(db[table])) db[table] = [];
+        const localArr = db[table];
+        if (!hashes[table]) hashes[table] = {};
+        const tableHashes = hashes[table];
         let changed = false;
 
         for (const remoteRec of remoteArr) {
+            if (remoteRec == null || remoteRec.id === undefined || remoteRec.id === null) continue;
             const id = String(remoteRec.id);
             const idx = localArr.findIndex(r => String(r.id) === id);
 
@@ -497,38 +633,9 @@ const CloudSync = (() => {
             }
         }
 
-        for (let i = localArr.length - 1; i >= 0; i--) {
-            const localRec = localArr[i];
-            const id = String(localRec.id);
-
-            if (!remoteIds.has(id)) {
-                if (tableHashes[id] !== undefined) {
-                    localArr.splice(i, 1);
-                    await StorageEngine.delete(table, localRec.id).catch(() => { });
-                    delete tableHashes[id];
-                    changed = true;
-                }
-            }
-        }
-
         hashes[table] = tableHashes;
+        saveHashes();
         return changed;
-    }
-
-    async function replaceLocalTableFromRemote(table, remoteArr) {
-        if (!Array.isArray(db[table])) db[table] = [];
-        await StorageEngine.clear(table).catch(() => { });
-        db[table] = remoteArr.slice();
-        if (remoteArr.length > 0) {
-            await StorageEngine.save(table, remoteArr).catch(() => { });
-        }
-        hashes[table] = {};
-        remoteArr.forEach(rec => {
-            if (rec && rec.id !== undefined && rec.id !== null) {
-                hashes[table][String(rec.id)] = hashOf(rec);
-            }
-        });
-        return true;
     }
 
     // ── جلب يدوي بزر — دمج البيانات المحلية مع بيانات السحابة دون مسح التعديلات المحلية ──
@@ -548,7 +655,7 @@ const CloudSync = (() => {
         const report = {};
         try {
             for (const table of SYNC_TABLES) {
-                const snap = await fsDB.collection(table).get({ source: 'server' });
+                const snap = await tableCollection(table).get({ source: 'server' });
                 const remoteArr = [];
                 snap.forEach(doc => {
                     const rawId = doc.id;
@@ -562,7 +669,7 @@ const CloudSync = (() => {
                 report[table] = remoteArr.length + (changed ? ' (تم التحديث/الدمج)' : ' (متطابقة)');
             }
 
-            const settingsDoc = await fsDB.collection('meta').doc('settings').get({ source: 'server' });
+            const settingsDoc = await settingsDocRef().get({ source: 'server' });
             if (settingsDoc.exists) {
                 const remoteSettings = { ...settingsDoc.data() };
                 delete remoteSettings._syncedAt;
@@ -596,6 +703,7 @@ const CloudSync = (() => {
     // يُستدعى من نهاية db.save() الأصلية في app.js
     function onLocalSave(modifiedTable) {
         if (!ready) return;
+        if (applyingRemote) return;
         if (modifiedTable && SYNC_TABLES.includes(modifiedTable)) {
             pushTableDiff(modifiedTable);
         } else if (!modifiedTable) {
@@ -644,14 +752,14 @@ const CloudSync = (() => {
     }
 
     function attachTableListener(table) {
-        const col = fsDB.collection(table);
+        const col = tableCollection(table);
         const lastSync = getLastSyncTime();
         let query = col;
 
         // ── تفعيل المزامنة بالفروقات (Delta Sync) ──
         // إذا سبق المزامنة، نستمع فقط للتعديلات التي حدثت بعد وقت آخر مزامنة ناجهة (مع هامش دقيقتين)
         if (lastSync > 0 && !isFreshSync) {
-            const safetyMargin = Math.max(0, lastSync - 120000);
+            const safetyMargin = Math.max(0, lastSync - 1800000); // هامش 30 دقيقة لعدم تفويت أي تعديلات أوفلاين
             query = col.where('_syncedAt', '>=', safetyMargin);
         }
 
@@ -666,6 +774,7 @@ const CloudSync = (() => {
             if (changed) {
                 saveHashes();
                 queueTableUIRefresh(table);
+                setStatus('online');
             }
             updateLastSyncTime();
         }, err => {
@@ -675,9 +784,9 @@ const CloudSync = (() => {
 
     function attachDeletionsListener() {
         const lastSync = getLastSyncTime();
-        let query = fsDB.collection('_deletions');
+        let query = deletionsCollection();
         if (lastSync > 0 && !isFreshSync) {
-            const safetyMargin = Math.max(0, lastSync - 120000);
+            const safetyMargin = Math.max(0, lastSync - 1800000);
             query = query.where('_syncedAt', '>=', safetyMargin);
         }
         query.onSnapshot(async snapshot => {
@@ -710,7 +819,7 @@ const CloudSync = (() => {
     }
 
     function attachSettingsListener() {
-        fsDB.collection('meta').doc('settings').onSnapshot(doc => {
+        settingsDocRef().onSnapshot(doc => {
             if (!doc.exists) return;
             if (doc.metadata.hasPendingWrites) return;
 
@@ -731,6 +840,7 @@ const CloudSync = (() => {
                 }
             } catch (e) { }
 
+            try { if (typeof window.applyProgramProfile === 'function') window.applyProgramProfile(); } catch (e) { }
             queueTableUIRefresh(null);
             updateLastSyncTime();
         }, err => console.warn('[CloudSync] settings listener error', err));
@@ -742,14 +852,134 @@ const CloudSync = (() => {
         attachDeletionsListener();
     }
 
+    function legacyImportStorageKey() {
+        return 'cloud_sync_legacy_root_imported_v2_' + FIREBASE_CONFIG.projectId + '_' + tenantId;
+    }
+
+    function mergeSettingsWithoutOverwritingCurrent(legacySettings) {
+        if (!legacySettings || typeof legacySettings !== 'object') return false;
+        const current = db._settings || {};
+        db._settings = { ...legacySettings, ...current };
+        if (legacySettings.appProfile || current.appProfile) {
+            db._settings.appProfile = {
+                ...(legacySettings.appProfile || {}),
+                ...(current.appProfile || {})
+            };
+        }
+        try { localStorage.setItem('edu_master_settings', JSON.stringify(db._settings)); } catch (e) {}
+        hashes.__settings = hashOf(db._settings);
+        return true;
+    }
+
+    async function writeLegacyRecordsToTenant(table, records) {
+        if (!records.length) return 0;
+        const CHUNK = 400;
+        let written = 0;
+        for (let i = 0; i < records.length; i += CHUNK) {
+            const chunk = records.slice(i, i + CHUNK);
+            const batch = fsDB.batch();
+            chunk.forEach(rec => {
+                if (!rec || rec.id === undefined || rec.id === null) return;
+                batch.set(tableCollection(table).doc(String(rec.id)), { ...sanitize(rec), _syncedAt: Date.now() }, { merge: true });
+            });
+            await batch.commit();
+            written += chunk.length;
+        }
+        return written;
+    }
+
+    async function writeLegacySettingsToTenant() {
+        if (!db._settings) return false;
+        await settingsDocRef().set({ ...sanitize(db._settings), _syncedAt: Date.now() }, { merge: true });
+        hashes.__settings = hashOf(db._settings);
+        return true;
+    }
+
+    async function importLegacyRootDataOnce(force = false) {
+        if (!force) {
+            try {
+                if (localStorage.getItem(legacyImportStorageKey()) === 'true') return false;
+            } catch (e) { }
+        }
+
+        let importedRecords = 0;
+        let writtenRecords = 0;
+        let importedSettings = false;
+        console.log('[CloudSync] 🔎 دمج بيانات الجذر القديم مع قاعدة المدرس الجديدة...');
+
+        for (const table of SYNC_TABLES) {
+            const tenantSnap = await tableCollection(table).get({ source: 'server' });
+            const tenantIds = new Set();
+            tenantSnap.forEach(doc => tenantIds.add(String(doc.id)));
+
+            const snap = await legacyTableCollection(table).get({ source: 'server' });
+            const localArr = Array.isArray(db[table]) ? db[table] : (db[table] = []);
+            const existingIds = new Set(localArr.map(r => String(r?.id)));
+            const missingArr = [];
+            const writeArr = [];
+            snap.forEach(doc => {
+                const rawId = doc.id;
+                const numericId = isNaN(Number(rawId)) ? rawId : Number(rawId);
+                const data = { ...doc.data(), id: numericId };
+                delete data._syncedAt;
+                if (!tenantIds.has(String(rawId))) writeArr.push(data);
+                if (!existingIds.has(String(numericId))) missingArr.push(data);
+            });
+
+            if (writeArr.length > 0) {
+                writtenRecords += await writeLegacyRecordsToTenant(table, writeArr);
+            }
+            if (missingArr.length > 0) {
+                importedRecords += missingArr.length;
+                await mergeRemoteTable(table, missingArr);
+            }
+        }
+
+        const legacySettingsDoc = await legacySettingsDocRef().get({ source: 'server' });
+        if (legacySettingsDoc.exists) {
+            const legacySettings = { ...legacySettingsDoc.data() };
+            delete legacySettings._syncedAt;
+            importedSettings = mergeSettingsWithoutOverwritingCurrent(legacySettings);
+            if (importedSettings) await writeLegacySettingsToTenant();
+        }
+
+        try { localStorage.setItem(legacyImportStorageKey(), 'true'); } catch (e) { }
+
+        if (importedRecords > 0 || writtenRecords > 0 || importedSettings) {
+            saveHashes();
+            console.log(`[CloudSync] ✅ تم دمج ${importedRecords} سجل محلياً وكتابة ${writtenRecords} سجل من النظام القديم داخل قاعدة المدرس الجديدة`);
+            return true;
+        }
+
+        return false;
+    }
+
+    async function importLegacyRootDataManual() {
+        if (!ready || !fsDB) throw new Error('CloudSync not ready');
+        setStatus('syncing');
+        applyingRemote = true;
+        try {
+            const imported = await importLegacyRootDataOnce(true);
+            saveHashes();
+            queueTableUIRefresh(null);
+            return imported;
+        } finally {
+            applyingRemote = false;
+            pushAllTables();
+            setStatus(navigator.onLine ? 'online' : 'offline');
+        }
+    }
+
     async function pullAllFromCloudInitial() {
         applyingRemote = true;
         try {
             const lastSync = getLastSyncTime();
+            await importLegacyRootDataOnce(false);
+            let tenantRecordCount = 0;
             for (const table of SYNC_TABLES) {
-                let colQuery = fsDB.collection(table);
+                let colQuery = tableCollection(table);
                 if (lastSync > 0 && !isFreshSync) {
-                    const safetyMargin = Math.max(0, lastSync - 120000);
+                    const safetyMargin = Math.max(0, lastSync - 1800000);
                     colQuery = colQuery.where('_syncedAt', '>=', safetyMargin);
                 }
                 const snap = await colQuery.get();
@@ -761,15 +991,15 @@ const CloudSync = (() => {
                     delete data._syncedAt;
                     remoteArr.push(data);
                 });
+                tenantRecordCount += remoteArr.length;
 
-                if (isFreshSync) {
-                    await replaceLocalTableFromRemote(table, remoteArr);
-                } else if (remoteArr.length > 0) {
+                if (remoteArr.length > 0) {
                     await mergeRemoteTable(table, remoteArr);
                 }
             }
 
-            const settingsDoc = await fsDB.collection('meta').doc('settings').get();
+            const settingsDoc = await settingsDocRef().get();
+            const tenantHasSettings = settingsDoc.exists;
             if (settingsDoc.exists) {
                 const remoteSettings = { ...settingsDoc.data() };
                 delete remoteSettings._syncedAt;
@@ -780,6 +1010,10 @@ const CloudSync = (() => {
             saveHashes();
             updateLastSyncTime();
             isFreshSync = false;
+
+            // ✅ حماية مهمة: بعد الدمج، نضمن رفع أي بيانات محلية غير موجودة على السحابة
+            applyingRemote = false;
+            pushAllTables();
         } catch (e) {
             console.warn('[CloudSync] pullAllFromCloudInitial warning:', e);
         } finally {
@@ -799,13 +1033,14 @@ const CloudSync = (() => {
             return;
         }
 
-        loadHashes();
-        populateHashesFromLocal();
         console.log('[CloudSync] بدء التهيئة لمشروع:', FIREBASE_CONFIG.projectId);
 
         try {
             firebase.initializeApp(FIREBASE_CONFIG);
             fsDB = firebase.firestore();
+            configureTenant();
+            loadHashes();
+            populateHashesFromLocal();
 
             // تفعيل الـ Persistence الخاصة بـ Firestore نفسها
             try {
@@ -820,8 +1055,6 @@ const CloudSync = (() => {
             console.log('[CloudSync] ✅ الاتصال جاهز، مشروع Firebase:', FIREBASE_CONFIG.projectId);
             setStatus(navigator.onLine ? 'syncing' : 'offline');
 
-            attachAllListeners();
-
             window.addEventListener('online', () => { console.log('[CloudSync] رجع النت — إعادة مزامنة'); setStatus('syncing'); pushAllTables(); });
             window.addEventListener('offline', () => setStatus('offline'));
 
@@ -832,6 +1065,7 @@ const CloudSync = (() => {
             } else {
                 pushAllTables();
             }
+            attachAllListeners();
 
             setTimeout(() => setStatus(navigator.onLine ? 'online' : 'offline'), 2500);
         } catch (err) {
@@ -845,6 +1079,7 @@ const CloudSync = (() => {
         const info = {
             ready,
             projectId: FIREBASE_CONFIG.projectId,
+            tenantId,
             online: navigator.onLine,
             tablesTracked: Object.keys(hashes).filter(k => k !== '__settings'),
             recordCountsPerTable: {},
@@ -859,7 +1094,7 @@ const CloudSync = (() => {
         init, onLocalSave, pushAllTables, isReady: () => ready, debugInfo,
         forceSync: pushAllTables,
         forceFullUpload,
-        syncTableNow, deleteRecord,
+        syncTableNow, deleteRecord, importLegacyRootData: importLegacyRootDataManual,
         manualPushToCloud, manualPullFromCloud,
         getFirestoreDB: () => fsDB
     };
