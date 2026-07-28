@@ -7293,7 +7293,7 @@ function _printDailyTreasuryCurrentGroup() {
     const todayStrAr = new Date(todayStr).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     const groupObj = db.groups.find(g => String(g.id) === String(currentGroupId));
     const gradeObj = (typeof gradesList !== 'undefined') ? gradesList.find(g => String(g.id) === String(currentGrade)) : null;
-    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'نظام إدارة الدروس', centerName: 'نظام إدارة الدروس' };
+    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'مستر محمد نبيل', centerName: 'مستر محمد نبيل' };
 
     const paymentsRows = todayPayments.map((p, i) => {
         const student = db.students.find(s => s.id === p.studentId);
@@ -7407,7 +7407,7 @@ function _printDailyTreasuryCurrentGroup() {
 
 // ── طباعة كشف جميع المجموعات لليوم ──────────────────────────────────
 function _printDailyTreasuryAllGroups() {
-    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'نظام إدارة الدروس', centerName: 'نظام إدارة الدروس' };
+    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'مستر محمد نبيل', centerName: 'مستر محمد نبيل' };
     const todayStrEn = new Date().toLocaleDateString('en-CA');
     const todayStrAr = new Date().toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -9494,7 +9494,7 @@ function renderMonthlyReportBody() {
     // ✅ إصلاح: نفس منطق sendMonthlyReportWhatsApp — استخدام حدود الدورة
     // الفعلية بدل حساب حدود الشهر الميلادي من جديد.
     const { start, end } = period;
-    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'نظام إدارة الدروس', centerName: 'نظام إدارة الدروس' };
+    const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : { teacherName: 'مستر محمد نبيل', centerName: 'مستر محمد نبيل' };
     const groupObj = db.groups.find(g => String(g.id) === String(s.groupId));
     const gradeObj = (typeof gradesList !== 'undefined') ? gradesList.find(g => String(g.id) === String(s.grade)) : null;
 
@@ -10502,9 +10502,9 @@ function initExperienceEnhancements() {
 function getProgramProfile() {
     if (!db._settings.appProfile) {
         db._settings.appProfile = {
-            centerName: 'سنتر البنا',
+            centerName: 'مستر محمد نبيل',
             appTitle: 'نظام إدارة الدروس',
-            teacherName: 'سنتر البنا',
+            teacherName: 'مستر محمد نبيل',
             specialization: 'لإعداد الأوائل',
             phone: '',
             absenceMessage: 'السلام عليكم ورحمة الله وبركاته،\nنحيط سيادتكم علماً بأن الطالب/ـة {StudentName} لم يحضر/تحضر الحصة الدراسية اليوم.\nنرجو التكرم بمتابعة سبب الغياب.',
@@ -10524,11 +10524,11 @@ function getProgramProfile() {
     if (db._settings.appProfile.reportMessage === undefined) {
         db._settings.appProfile.reportMessage = 'السلام عليكم ورحمة الله وبركاته،\nنرفق لسيادتكم تقرير الأداء الشهري للطالب/ـة {StudentName}.\nنسأل الله لابنكم/ابنتكم دوام التوفيق والنجاح.';
     }
-    if (!db._settings.appProfile.teacherName || db._settings.appProfile.teacherName === 'نظام إدارة الدروس' || db._settings.appProfile.teacherName === 'سنتر العباقرة' || db._settings.appProfile.teacherName === 'مستر محمد نبيل' || db._settings.appProfile.teacherName === 'سنتر البنا لإعداد الأوائل') {
-        db._settings.appProfile.teacherName = 'سنتر البنا';
+    if (!db._settings.appProfile.teacherName || db._settings.appProfile.teacherName === 'نظام إدارة الدروس' || db._settings.appProfile.teacherName === 'سنتر العباقرة' || db._settings.appProfile.teacherName === 'سنتر البنا لإعداد الأوائل' || db._settings.appProfile.teacherName === 'سنتر البنا') {
+        db._settings.appProfile.teacherName = 'مستر محمد نبيل';
     }
-    if (!db._settings.appProfile.centerName || db._settings.appProfile.centerName === 'نظام إدارة الدروس' || db._settings.appProfile.centerName === 'سنتر العباقرة' || db._settings.appProfile.centerName === 'مستر محمد نبيل' || db._settings.appProfile.centerName === 'سنتر البنا لإعداد الأوائل') {
-        db._settings.appProfile.centerName = 'سنتر البنا';
+    if (!db._settings.appProfile.centerName || db._settings.appProfile.centerName === 'نظام إدارة الدروس' || db._settings.appProfile.centerName === 'سنتر العباقرة' || db._settings.appProfile.centerName === 'سنتر البنا لإعداد الأوائل' || db._settings.appProfile.centerName === 'سنتر البنا') {
+        db._settings.appProfile.centerName = 'مستر محمد نبيل';
     }
 
     return db._settings.appProfile;
@@ -10537,7 +10537,7 @@ function getProgramProfile() {
 /** يعيد اسم المدرس المحفوظ في الإعدادات، أو نص بديل إن لم يُعيَّن */
 function getTeacherDisplayName() {
     const profile = getProgramProfile();
-    return (profile.teacherName && profile.teacherName.trim()) ? profile.teacherName.trim() : 'سنتر البنا';
+    return (profile.teacherName && profile.teacherName.trim()) ? profile.teacherName.trim() : 'مستر محمد نبيل';
 }
 
 /** يعيد نص رسالة الغياب بعد استبدال {StudentName} باسم الطالب */
@@ -10737,7 +10737,7 @@ function applyProgramProfile() {
     if (splashTitle) splashTitle.innerText = appTitle;
 
     const logo = document.querySelector('.logo');
-    if (logo) logo.innerHTML = `<i class="fas fa-book-open"></i> ${profile.centerName || 'سنتر البنا'}`;
+    if (logo) logo.innerHTML = `<i class="fas fa-book-open"></i> ${profile.centerName || 'مستر محمد نبيل'}`;
 
     const userName = document.querySelector('.user-profile span');
     if (userName) userName.innerText = getTeacherDisplayName();
@@ -11132,7 +11132,7 @@ function printPlatformCourseCards() {
     const rows = getPlatformCodesFiltered();
     if (!rows.length) return showNotification('لا توجد أكواد للطباعة', 'warning');
     const profile = (typeof getProgramProfile === 'function') ? getProgramProfile() : {};
-    const teacherName = (typeof getTeacherDisplayName === 'function') ? getTeacherDisplayName() : (profile.teacherName || 'نظام إدارة الدروس');
+    const teacherName = (typeof getTeacherDisplayName === 'function') ? getTeacherDisplayName() : (profile.teacherName || 'مستر محمد نبيل');
     const html = `
     <html dir="rtl"><head><title>أكواد المنصة</title>
     <style>
